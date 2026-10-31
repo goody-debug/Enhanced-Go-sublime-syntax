@@ -1,0 +1,755 @@
+%YAML 1.2
+---
+name: Go
+file_extensions:
+  - go
+scope: source.go
+version: 2
+
+variables:
+  ident: '\b[[:alpha:]_][[:alnum:]_]*\b'
+  exported_ident: '\b[[:upper:]][[:alnum:]_]*\b'
+  pkg_ident: '\b[[:lower:]_][[:alnum:]_]*\b'
+  
+  predeclared_types: |-
+    \b(?:any|bool|byte|comparable|complex64|complex128|error|float32|float64|int|int8|int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr)\b
+  
+  predeclared_funcs: |-
+    \b(?:append|cap|clear|close|complex|copy|delete|imag|len|make|max|min|new|panic|print|println|real|recover)\b
+  
+  predeclared_consts: '\b(?:true|false|iota)\b'
+  
+  dec_digits: '(?:\d+(?:_\d+)*)'
+  hex_digits: '(?:[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*)'
+  oct_digits: '(?:[0-7]+(?:_[0-7]+)*)'
+  bin_digits: '(?:[01]+(?:_[01]+)*)'
+  dec_exponent: '(?:[eE][-+]?{{dec_digits}})'
+  hex_exponent: '(?:[pP][-+]?{{dec_digits}})'
+  
+  escape_char: |-
+    \\(?:[abfnrtv\\"'`]|[0-7]{3}|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})
+  
+  fmt_verb: |-
+    (?x)
+    %
+    (?:
+      %
+      |
+      (?:\[\d+\])?
+      [-+#0 ]*
+      (?:\d+|(?:\[\d+\])?\*)?
+      (?:\.(?:\d+|(?:\[\d+\])?\*)?)?
+      (?:\[\d+\])?
+      [vTtbcdoOqxXUeEfFgGspw]
+    )
+
+contexts:
+  prototype:
+    - include: comments
+
+  main:
+    - include: package-clause
+    - include: import-declaration
+    - include: type-declaration
+    - include: func-declaration
+    - include: var-const-declaration
+    - include: statements
+
+  # ============================================================================
+  # Comments & Compiler Directives (//go:..., // +build)
+  # ============================================================================
+  comments:
+    # Go compiler directives (//go:embed, //go:noinline, //go:build, etc.)
+    - match: ^(//)(go:[a-zA-Z0-9_]+)\b
+      captures:
+        1: comment.line.double-slash.go punctuation.definition.comment.go
+        2: keyword.control.directive.go
+      push:
+        - meta_scope: meta.preprocessor.go comment.line.double-slash.go
+        - match: \n
+          pop: true
+        - match: '"[^"]*"|`[^`]*`'
+          scope: string.quoted.directive.go
+        - match: '&&|\|\||!'
+          scope: keyword.operator.logical.directive.go
+        - match: '\b(?:linux|darwin|windows|freebsd|openbsd|netbsd|amd64|arm64|386|arm|wasm|cgo|unix|gc|gccgo)\b'
+          scope: support.constant.builtin.directive.go
+        - match: '\S+'
+          scope: variable.parameter.directive.go
+
+    # Legacy build tags & line directives
+    - match: ^(//)(\s*\+build\b|line\b)
+      captures:
+        1: comment.line.double-slash.go punctuation.definition.comment.go
+        2: keyword.control.directive.go
+      push:
+        - meta_scope: meta.preprocessor.go comment.line.double-slash.go
+        - match: \n
+          pop: true
+
+    - match: //
+      captures:
+        0: punctuation.definition.comment.go
+      push:
+        - meta_scope: comment.line.double-slash.go
+        - match: \b(TODO|FIXME|NOTE|BUG|HACK|XXX)\b:?
+          scope: storage.type.todo.go
+        - match: \n
+          pop: true
+
+    - match: /\*
+      captures:
+        0: punctuation.definition.comment.begin.go
+      push:
+        - meta_scope: comment.block.go
+        - match: \b(TODO|FIXME|NOTE|BUG|HACK|XXX)\b:?
+          scope: storage.type.todo.go
+        - match: \*/
+          captures:
+            0: punctuation.definition.comment.end.go
+          pop: true
+
+  # ============================================================================
+  # Package & Imports
+  # ============================================================================
+  package-clause:
+    - match: \b(package)\s+({{ident}})
+      scope: meta.package.go
+      captures:
+        1: keyword.control.package.go
+        2: entity.name.namespace.go
+
+  import-declaration:
+    - match: \b(import)\b
+      captures:
+        1: keyword.control.import.go
+      push:
+        - meta_scope: meta.import.go
+        - match: \(
+          captures:
+            0: punctuation.section.parens.begin.go
+          push:
+            - match: \)
+              captures:
+                0: punctuation.section.parens.end.go
+              pop: true
+            - include: import-spec
+        - include: import-spec
+        - match: (?=[;\n])
+          pop: true
+
+  import-spec:
+    - match: (\.|_)\s*(?=["`])
+      captures:
+        1: keyword.operator.import.alias.go
+    - match: ({{ident}})\s*(?=["`])
+      captures:
+        1: entity.name.namespace.alias.go
+    - include: strings
+
+  # ============================================================================
+  # Type Declarations (Structs, Interfaces, Generics, Aliases)
+  # ============================================================================
+  type-declaration:
+    - match: \b(type)\b
+      captures:
+        1: storage.type.keyword.go
+      push:
+        - meta_scope: meta.type-declaration.go
+        - match: \(
+          captures:
+            0: punctuation.section.parens.begin.go
+          set:
+            - meta_scope: meta.type-declaration.group.go
+            - match: \)
+              captures:
+                0: punctuation.section.parens.end.go
+              pop: true
+            - include: type-spec-inner
+        - include: type-spec-inner
+        - match: (?=[;\n])
+          pop: true
+
+  type-spec-inner:
+    # Type name + optional generic type parameter list [T any]
+    - match: ({{ident}})\s*(\[)?
+      captures:
+        1: entity.name.type.declaration.go
+        2: punctuation.section.brackets.begin.go
+      push:
+        - match: (?=[;\n\)]|\btype\b)
+          pop: true
+        - match: (?<=\[)
+          push: generic-type-params-body
+        - match: (=)
+          captures:
+            1: keyword.operator.assignment.alias.go
+          set: type-signature-consumeline
+        - include: type-definition-rhs
+
+  generic-type-params-body:
+    - meta_content_scope: meta.generic.type-parameters.go
+    - match: \]
+      captures:
+        0: punctuation.section.brackets.end.go
+      pop: true
+    - match: ({{ident}})(?=\s*(?:,|\b|\[|~|\*))
+      captures:
+        1: entity.name.type.parameter.go
+    - match: (~)
+      scope: keyword.operator.type.approximation.go
+    - match: (\|)
+      scope: keyword.operator.type.union.go
+    - match: ,
+      scope: punctuation.separator.comma.go
+    - include: types
+
+  type-definition-rhs:
+    - match: \b(struct)\b\s*(\{)
+      captures:
+        1: storage.type.struct.go
+        2: punctuation.section.braces.begin.go
+      set: struct-body
+    - match: \b(interface)\b\s*(\{)
+      captures:
+        1: storage.type.interface.go
+        2: punctuation.section.braces.begin.go
+      set: interface-body
+    - include: types
+
+  type-signature-consumeline:
+    - match: (?=[;\n\)])
+      pop: true
+    - include: type-definition-rhs
+
+  # ============================================================================
+  # Struct Body & Backtick Struct Tags
+  # ============================================================================
+  struct-body:
+    - meta_scope: meta.struct.body.go
+    - match: \}
+      captures:
+        0: punctuation.section.braces.end.go
+      pop: true
+    # Struct tags: `json:"field,omitempty" db:"id"`
+    - match: '`'
+      captures:
+        0: punctuation.definition.string.begin.go
+      push: struct-tag-body
+    # Anonymous / Embedded qualified type: *pkg.Type or pkg.Type
+    - match: (\*)?\b({{pkg_ident}})(\.)({{exported_ident}})\b(?=\s*(?:`|//|/\*|;|\n|\}))
+      captures:
+        1: keyword.operator.pointer.go
+        2: support.module.go
+        3: punctuation.accessor.dot.go
+        4: entity.other.inherited-class.go
+    # Anonymous / Embedded local type: *Type or Type
+    - match: ^\s*(\*)?({{ident}})(?=\s*(?:`|//|/\*|;|\n|\}|\[))
+      captures:
+        1: keyword.operator.pointer.go
+        2: entity.other.inherited-class.go
+    # Explicit field declaration: field1, field2 Type
+    - match: ({{ident}})(?=\s*(?:,\s*{{ident}})*\s+(?:\*|\b|\[|<-))
+      captures:
+        1: variable.other.member.declaration.go
+    - match: ,
+      scope: punctuation.separator.comma.go
+    - include: type-definition-rhs
+
+  struct-tag-body:
+    - meta_scope: meta.struct.tag.go string.quoted.raw.struct-tag.go
+    - match: '`'
+      captures:
+        0: punctuation.definition.string.end.go
+      pop: true
+    - match: '([a-zA-Z0-9_]+)(:)(")'
+      captures:
+        1: entity.other.attribute-name.struct-tag.go
+        2: punctuation.separator.key-value.struct-tag.go
+        3: punctuation.definition.string.begin.struct-tag.go
+      push:
+        - meta_scope: meta.struct.tag.value.go
+        - match: '"'
+          captures:
+            0: punctuation.definition.string.end.struct-tag.go
+          pop: true
+        - match: '\\["\\]'
+          scope: constant.character.escape.go
+        - match: '(?<=,)(omitempty|omitzero|string|inline|required|readonly|noindex|-)\b'
+          scope: keyword.other.struct-tag.option.go
+        - match: ','
+          scope: punctuation.separator.struct-tag.go
+        - match: '[^",\\]+'
+          scope: string.unquoted.struct-tag.value.go
+
+  # ============================================================================
+  # Interface Body (Methods, Embedded Interfaces, Type Unions)
+  # ============================================================================
+  interface-body:
+    - meta_scope: meta.interface.body.go
+    - match: \}
+      captures:
+        0: punctuation.section.braces.end.go
+      pop: true
+    # Interface method signature
+    - match: \b({{ident}})\s*(?=\()
+      captures:
+        1: entity.name.function.interface.go
+      push:
+        - match: (?=[;\n\}])
+          pop: true
+        - include: func-parameters-and-returns
+    # Approximation & Union constraints (~int | ~string)
+    - match: (~)
+      scope: keyword.operator.type.approximation.go
+    - match: (\|)
+      scope: keyword.operator.type.union.go
+    # Embedded qualified interface (io.Reader)
+    - match: \b({{pkg_ident}})(\.)({{exported_ident}})\b
+      captures:
+        1: support.module.go
+        2: punctuation.accessor.dot.go
+        3: entity.other.inherited-class.interface.go
+    - include: types
+
+  # ============================================================================
+  # Functions, Methods, Receivers, & Signatures
+  # ============================================================================
+  func-declaration:
+    # Method declaration: func (r *Receiver[T]) Name(...)
+    - match: \b(func)\s*(\()
+      captures:
+        1: storage.type.function.go
+        2: punctuation.section.parens.begin.receiver.go
+      push:
+        - meta_scope: meta.function.method.declaration.go
+        - include: method-receiver-inner
+    # Standard function declaration: func Name[T any](...)
+    - match: \b(func)\s+({{ident}})
+      captures:
+        1: storage.type.function.go
+        2: entity.name.function.declaration.go
+      push:
+        - meta_scope: meta.function.declaration.go
+        - include: func-generic-and-signature
+    # Anonymous function / closure: func(...)
+    - match: \b(func)\b(?=\s*\()
+      captures:
+        1: storage.type.function.closure.go
+      push:
+        - meta_scope: meta.function.closure.go
+        - include: func-parameters-and-returns
+
+  method-receiver-inner:
+    - match: \)
+      captures:
+        0: punctuation.section.parens.end.receiver.go
+      set:
+        - match: ({{ident}})
+          captures:
+            1: entity.name.function.method.declaration.go
+          set: func-generic-and-signature
+    - match: ({{ident}})\s+(?=(?:\*|\b|\[))
+      captures:
+        1: variable.parameter.receiver.go
+    - match: \*
+      scope: keyword.operator.pointer.receiver.go
+    - match: ({{ident}})\s*(\[)
+      captures:
+        1: storage.type.receiver.go
+        2: punctuation.section.brackets.begin.go
+      push: generic-type-params-body
+    - match: ({{ident}})
+      scope: storage.type.receiver.go
+
+  func-generic-and-signature:
+    - match: \[
+      captures:
+        0: punctuation.section.brackets.begin.go
+      push: generic-type-params-body
+    - include: func-parameters-and-returns
+
+  func-parameters-and-returns:
+    - match: \(
+      captures:
+        0: punctuation.section.parens.begin.go
+      push:
+        - meta_scope: meta.function.parameters.go
+        - match: \)
+          captures:
+            0: punctuation.section.parens.end.go
+          pop: true
+        - match: ({{ident}})(?=\s*(?:,\s*{{ident}})*\s+(?:\.\.\.|\*|\b|\[|<-))
+          captures:
+            1: variable.parameter.function.go
+        - match: \.\.\.
+          scope: keyword.operator.variadic.go
+        - match: ,
+          scope: punctuation.separator.parameter.go
+        - include: types
+    # Function body start or end of signature
+    - match: (?=\{)
+      pop: true
+    - match: (?=[;\n,\)\}])
+      pop: true
+    - include: types
+
+  # ============================================================================
+  # Var & Const Declarations
+  # ============================================================================
+  var-const-declaration:
+    - match: \b(const|var)\b
+      captures:
+        1: storage.modifier.declaration.go
+      push:
+        - match: \(
+          captures:
+            0: punctuation.section.parens.begin.go
+          set:
+            - meta_scope: meta.declaration.group.go
+            - match: \)
+              captures:
+                0: punctuation.section.parens.end.go
+              pop: true
+            - include: var-const-inner
+        - include: var-const-inner
+        - match: (?=[;\n])
+          pop: true
+
+  var-const-inner:
+    - match: \b(_)\b
+      scope: variable.language.blank.go
+    # ALL_CAPS constants
+    - match: \b([[:upper:]_][[:upper:]0-9_]{2,})\b(?=\s*(?:,|=|;|//|\n|$))
+      scope: constant.other.declaration.go
+    # Standard variable/const name before = or type
+    - match: ({{ident}})(?=\s*(?:,|=))
+      scope: variable.other.declaration.go
+    - match: ({{ident}})(?=\s+(?:\*|\b|\[|<-))
+      scope: variable.other.declaration.go
+      push:
+        - match: (?==|[;\n\)])
+          pop: true
+        - include: types
+    - match: (=)
+      captures:
+        1: keyword.operator.assignment.go
+      push:
+        - match: (?=[;\n\)])
+          pop: true
+        - include: expressions
+    - include: expressions
+
+  # ============================================================================
+  # Types (Built-ins, Qualified Types, Pointers, Channels, Slices, Maps)
+  # ============================================================================
+  types:
+    - match: \b(map)\s*(\[)
+      captures:
+        1: storage.type.map.go
+        2: punctuation.section.brackets.begin.go
+      push:
+        - match: \]
+          captures:
+            0: punctuation.section.brackets.end.go
+          pop: true
+        - include: types
+    - match: (<-)?\b(chan)\b(\s*<-)?
+      captures:
+        1: keyword.operator.channel.receive.go
+        2: storage.type.channel.go
+        3: keyword.operator.channel.send.go
+    - match: \b(struct)\b\s*(\{)
+      captures:
+        1: storage.type.struct.go
+        2: punctuation.section.braces.begin.go
+      push: struct-body
+    - match: \b(interface)\b\s*(\{)
+      captures:
+        1: storage.type.interface.go
+        2: punctuation.section.braces.begin.go
+      push: interface-body
+    - match: \b(func)\b(?=\s*\()
+      captures:
+        1: storage.type.function.go
+      push: func-parameters-and-returns
+    - match: '{{predeclared_types}}'
+      scope: storage.type.builtin.go
+    # Package-qualified type: pkg.Type
+    - match: \b({{pkg_ident}})(\.)({{exported_ident}})\b
+      captures:
+        1: support.module.go
+        2: punctuation.accessor.dot.go
+        3: support.type.qualified.go
+    # Generic type instantiation: Type[T, K]
+    - match: ({{ident}})(\[)
+      captures:
+        1: support.type.go
+        2: punctuation.section.brackets.begin.go
+      push:
+        - match: \]
+          captures:
+            0: punctuation.section.brackets.end.go
+          pop: true
+        - match: ,
+          scope: punctuation.separator.comma.go
+        - include: types
+        - include: expressions
+    - match: '\[(?:\d+|\.\.\.)?\]'
+      scope: meta.brackets.slice.go
+    - match: \*
+      scope: keyword.operator.pointer.go
+    - match: '{{ident}}'
+      scope: support.type.go
+
+  # ============================================================================
+  # Statements & Expressions
+  # ============================================================================
+  statements:
+    # Labels (goto / break / continue targets)
+    - match: ^\s*({{ident}})\s*(:)(?!=)
+      captures:
+        1: entity.name.label.go
+        2: punctuation.separator.label.go
+    - match: \b(goto|break|continue)\s+({{ident}})\b
+      captures:
+        1: keyword.control.flow.go
+        2: entity.name.label.go
+    # Control Flow Keywords
+    - match: \b(if|else|switch|case|default|for|range|select|return|break|continue|goto|fallthrough)\b
+      scope: keyword.control.flow.go
+    - match: \b(go|defer)\b
+      scope: keyword.control.coroutine.go
+    # Short variable declaration: a, b := ...
+    - match: \b({{ident}})(?=\s*(?:,\s*{{ident}})*\s*:=)
+      captures:
+        1: variable.other.declaration.short.go
+    - include: expressions
+
+  expressions:
+    - include: literals
+    - include: composite-literals
+    - include: function-and-method-calls
+    - include: identifiers-and-accessors
+    - include: operators
+    - include: punctuation
+
+  # ============================================================================
+  # Composite Literals (Struct & Map Initialization Keys)
+  # ============================================================================
+  composite-literals:
+    - match: \{
+      captures:
+        0: punctuation.section.braces.begin.go
+      push:
+        - match: \}
+          captures:
+            0: punctuation.section.braces.end.go
+          pop: true
+        # Struct field key inside braces: FieldName: value
+        - match: \b({{ident}})\s*(:)(?!=)
+          captures:
+            1: variable.other.member.key.go
+            2: punctuation.separator.key-value.go
+        - include: statements
+
+  # ============================================================================
+  # Calls, Accessors, & Disambiguation
+  # ============================================================================
+  function-and-method-calls:
+    # Built-in type conversion: int64(x), string(b), []byte(s)
+    - match: '{{predeclared_types}}(?=\s*\()'
+      scope: support.type.builtin.conversion.go
+    # Built-in functions: make(...), append(...), len(...), min(...), clear(...)
+    - match: '{{predeclared_funcs}}(?=\s*\()'
+      scope: support.function.builtin.go
+    # Package function call or method call: pkg.Func(...) or obj.Method(...)
+    - match: (\.)({{ident}})(?=\s*\()
+      captures:
+        1: punctuation.accessor.dot.go
+        2: variable.function.method.go
+    # Generic function/method call: Func[int](...)
+    - match: (\.)?({{ident}})(\[)
+      captures:
+        1: punctuation.accessor.dot.go
+        2: variable.function.generic.go
+        3: punctuation.section.brackets.begin.go
+      push:
+        - match: \]
+          captures:
+            0: punctuation.section.brackets.end.go
+          pop: true
+        - include: types
+        - include: expressions
+    # Standalone function call: myFunc(...)
+    - match: \b({{ident}})(?=\s*\()
+      captures:
+        1: variable.function.go
+
+  identifiers-and-accessors:
+    # Blank identifier _
+    - match: \b(_)\b
+      scope: variable.language.blank.go
+    # Type assertion: x.(Type) or x.(type)
+    - match: (\.)(\()
+      captures:
+        1: punctuation.accessor.dot.go
+        2: punctuation.section.parens.begin.type-assertion.go
+      push:
+        - meta_scope: meta.type-assertion.go
+        - match: \)
+          captures:
+            0: punctuation.section.parens.end.type-assertion.go
+          pop: true
+        - match: \b(type)\b
+          scope: keyword.control.switch.type.go
+        - include: types
+    # Package qualifier before exported symbol: fmt.Println, http.StatusOK, io.EOF
+    - match: \b({{pkg_ident}})(\.)(?={{exported_ident}})
+      captures:
+        1: support.module.go
+        2: punctuation.accessor.dot.go
+    # Member/field access: user.Name, cfg.port
+    - match: (\.)({{ident}})
+      captures:
+        1: punctuation.accessor.dot.go
+        2: variable.other.member.go
+    # Predeclared types used in expressions (e.g. make([]int, 0))
+    - match: '{{predeclared_types}}'
+      scope: storage.type.builtin.go
+    # SCREAMING_SNAKE_CASE constants
+    - match: \b([[:upper:]_][[:upper:]0-9_]{2,})\b
+      scope: constant.other.caps.go
+    # Exported PascalCase identifier (Types / Exported symbols)
+    - match: '{{exported_ident}}'
+      scope: variable.other.exported.go
+    # Standard local identifier
+    - match: '{{ident}}'
+      scope: variable.other.readwrite.go
+
+  # ============================================================================
+  # Literals (Numbers, Strings, Runes, Printf Verbs, Booleans, Nil)
+  # ============================================================================
+  literals:
+    - match: '{{predeclared_consts}}'
+      scope: constant.language.boolean.go
+    - match: \b(nil)\b
+      scope: constant.language.nil.go
+    - include: numbers
+    - include: strings
+
+  numbers:
+    # Imaginary numbers
+    - match: \b(?:0[xX]{{hex_digits}}(?:\.{{hex_digits}})?{{hex_exponent}}?|{{dec_digits}}(?:\.{{dec_digits}})?{{dec_exponent}}?|\.\d+(?:_\d+)*{{dec_exponent}}?)(i)\b
+      scope: constant.numeric.imaginary.go
+      captures:
+        1: storage.type.numeric.imaginary.go
+    # Hexadecimal floats & ints
+    - match: \b(0[xX]){{hex_digits}}(?:\.{{hex_digits}})?{{hex_exponent}}\b
+      scope: constant.numeric.float.hexadecimal.go
+      captures:
+        1: punctuation.definition.numeric.base.go
+    - match: \b(0[xX]){{hex_digits}}\b
+      scope: constant.numeric.integer.hexadecimal.go
+      captures:
+        1: punctuation.definition.numeric.base.go
+    # Octal & Binary ints
+    - match: \b(0[oO]?){{oct_digits}}\b
+      scope: constant.numeric.integer.octal.go
+      captures:
+        1: punctuation.definition.numeric.base.go
+    - match: \b(0[bB]){{bin_digits}}\b
+      scope: constant.numeric.integer.binary.go
+      captures:
+        1: punctuation.definition.numeric.base.go
+    # Decimal floats & ints
+    - match: (?:\b{{dec_digits}}\.{{dec_digits}}?{{dec_exponent}}?|\b{{dec_digits}}{{dec_exponent}}|\B\.{{dec_digits}}{{dec_exponent}}?)\b
+      scope: constant.numeric.float.decimal.go
+    - match: \b{{dec_digits}}\b
+      scope: constant.numeric.integer.decimal.go
+
+  strings:
+    # Interpreted string literals: "..."
+    - match: '"'
+      captures:
+        0: punctuation.definition.string.begin.go
+      push:
+        - meta_scope: string.quoted.double.go
+        - match: '"'
+          captures:
+            0: punctuation.definition.string.end.go
+          pop: true
+        - match: '{{escape_char}}'
+          scope: constant.character.escape.go
+        - match: '{{fmt_verb}}'
+          scope: constant.other.placeholder.go
+        - match: \\.
+          scope: invalid.illegal.unknown-escape.go
+        - match: \n
+          scope: invalid.illegal.unclosed-string.go
+          pop: true
+
+    # Raw string literals: `...`
+    - match: '`'
+      captures:
+        0: punctuation.definition.string.begin.go
+      push:
+        - meta_scope: string.quoted.raw.go
+        - match: '`'
+          captures:
+            0: punctuation.definition.string.end.go
+          pop: true
+        - match: '{{fmt_verb}}'
+          scope: constant.other.placeholder.go
+
+    # Rune literals: 'a', '\n', '\u1234'
+    - match: (')(?:({{escape_char}})|([^'\\\n]))(')
+      scope: string.quoted.single.rune.go
+      captures:
+        1: punctuation.definition.string.begin.go
+        2: constant.character.escape.go
+        3: constant.character.rune.go
+        4: punctuation.definition.string.end.go
+
+  # ============================================================================
+  # Operators & Punctuation
+  # ============================================================================
+  operators:
+    - match: ':='
+      scope: keyword.operator.assignment.define.go
+    - match: '<-'
+      scope: keyword.operator.channel.go
+    - match: '\.\.\.'
+      scope: keyword.operator.variadic.go
+    - match: '(?:<<|>>|&\^|&|\||\^|%|\+|-|\*|/)='
+      scope: keyword.operator.assignment.compound.go
+    - match: '==|!=|<=|>=|<|>'
+      scope: keyword.operator.comparison.go
+    - match: '&&|\|\||!'
+      scope: keyword.operator.logical.go
+    - match: '\+\+|--'
+      scope: keyword.operator.increment-decrement.go
+    - match: '<<|>>|&\^|&|\||\^'
+      scope: keyword.operator.bitwise.go
+    - match: '='
+      scope: keyword.operator.assignment.go
+    - match: '\+|-|\*|/|%'
+      scope: keyword.operator.arithmetic.go
+    - match: '~'
+      scope: keyword.operator.type.approximation.go
+
+  punctuation:
+    - match: '\('
+      scope: punctuation.section.parens.begin.go
+    - match: '\)'
+      scope: punctuation.section.parens.end.go
+    - match: '\['
+      scope: punctuation.section.brackets.begin.go
+    - match: '\]'
+      scope: punctuation.section.brackets.end.go
+    - match: ';'
+      scope: punctuation.terminator.statement.go
+    - match: ','
+      scope: punctuation.separator.comma.go
+    - match: ':'
+      scope: punctuation.separator.colon.go
