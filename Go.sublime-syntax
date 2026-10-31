@@ -59,7 +59,6 @@ contexts:
   # Comments & Compiler Directives (//go:..., // +build)
   # ============================================================================
   comments:
-    # Go compiler directives (//go:embed, //go:noinline, //go:build, etc.)
     - match: ^(//)(go:[a-zA-Z0-9_]+)\b
       captures:
         1: comment.line.double-slash.go punctuation.definition.comment.go
@@ -77,7 +76,6 @@ contexts:
         - match: '\S+'
           scope: variable.parameter.directive.go
 
-    # Legacy build tags & line directives
     - match: ^(//)(\s*\+build\b|line\b)
       captures:
         1: comment.line.double-slash.go punctuation.definition.comment.go
@@ -153,7 +151,7 @@ contexts:
   type-declaration:
     - match: \b(type)\b
       captures:
-        1: storage.type.keyword.go
+        1: keyword.declaration.type.go
       push:
         - meta_scope: meta.type-declaration.go
         - match: \(
@@ -171,10 +169,9 @@ contexts:
           pop: true
 
   type-spec-inner:
-    # Type name + optional generic type parameter list [T any]
     - match: ({{ident}})\s*(\[)?
       captures:
-        1: entity.name.type.declaration.go
+        1: entity.name.type.go
         2: punctuation.section.brackets.begin.go
       push:
         - match: (?=[;\n\)]|\btype\b)
@@ -207,12 +204,12 @@ contexts:
   type-definition-rhs:
     - match: \b(struct)\b\s*(\{)
       captures:
-        1: storage.type.struct.go
+        1: keyword.declaration.struct.go
         2: punctuation.section.braces.begin.go
       set: struct-body
     - match: \b(interface)\b\s*(\{)
       captures:
-        1: storage.type.interface.go
+        1: keyword.declaration.interface.go
         2: punctuation.section.braces.begin.go
       set: interface-body
     - include: types
@@ -231,24 +228,20 @@ contexts:
       captures:
         0: punctuation.section.braces.end.go
       pop: true
-    # Struct tags: `json:"field,omitempty" db:"id"`
     - match: '`'
       captures:
         0: punctuation.definition.string.begin.go
       push: struct-tag-body
-    # Anonymous / Embedded qualified type: *pkg.Type or pkg.Type
     - match: (\*)?\b({{pkg_ident}})(\.)({{exported_ident}})\b(?=\s*(?:`|//|/\*|;|\n|\}))
       captures:
         1: keyword.operator.pointer.go
         2: support.module.go
         3: punctuation.accessor.dot.go
         4: entity.other.inherited-class.go
-    # Anonymous / Embedded local type: *Type or Type
     - match: ^\s*(\*)?({{ident}})(?=\s*(?:`|//|/\*|;|\n|\}|\[))
       captures:
         1: keyword.operator.pointer.go
         2: entity.other.inherited-class.go
-    # Explicit field declaration: field1, field2 Type
     - match: ({{ident}})(?=\s*(?:,\s*{{ident}})*\s+(?:\*|\b|\[|<-))
       captures:
         1: variable.other.member.declaration.go
@@ -291,7 +284,6 @@ contexts:
       captures:
         0: punctuation.section.braces.end.go
       pop: true
-    # Interface method signature
     - match: \b({{ident}})\s*(?=\()
       captures:
         1: entity.name.function.interface.go
@@ -299,12 +291,10 @@ contexts:
         - match: (?=[;\n\}])
           pop: true
         - include: func-parameters-and-returns
-    # Approximation & Union constraints (~int | ~string)
     - match: (~)
       scope: keyword.operator.type.approximation.go
     - match: (\|)
       scope: keyword.operator.type.union.go
-    # Embedded qualified interface (io.Reader)
     - match: \b({{pkg_ident}})(\.)({{exported_ident}})\b
       captures:
         1: support.module.go
@@ -319,23 +309,23 @@ contexts:
     # Method declaration: func (r *Receiver[T]) Name(...)
     - match: \b(func)\s*(\()
       captures:
-        1: storage.type.function.go
+        1: keyword.declaration.function.go
         2: punctuation.section.parens.begin.receiver.go
       push:
-        - meta_scope: meta.function.method.declaration.go
+        - meta_scope: meta.function.go
         - include: method-receiver-inner
     # Standard function declaration: func Name[T any](...)
     - match: \b(func)\s+({{ident}})
       captures:
-        1: storage.type.function.go
-        2: entity.name.function.declaration.go
+        1: keyword.declaration.function.go
+        2: entity.name.function.go
       push:
-        - meta_scope: meta.function.declaration.go
+        - meta_scope: meta.function.go
         - include: func-generic-and-signature
     # Anonymous function / closure: func(...)
     - match: \b(func)\b(?=\s*\()
       captures:
-        1: storage.type.function.closure.go
+        1: keyword.declaration.function.go
       push:
         - meta_scope: meta.function.closure.go
         - include: func-parameters-and-returns
@@ -347,7 +337,7 @@ contexts:
       set:
         - match: ({{ident}})
           captures:
-            1: entity.name.function.method.declaration.go
+            1: entity.name.function.go
           set: func-generic-and-signature
     - match: ({{ident}})\s+(?=(?:\*|\b|\[))
       captures:
@@ -356,11 +346,11 @@ contexts:
       scope: keyword.operator.pointer.receiver.go
     - match: ({{ident}})\s*(\[)
       captures:
-        1: storage.type.receiver.go
+        1: support.type.receiver.go
         2: punctuation.section.brackets.begin.go
       push: generic-type-params-body
     - match: ({{ident}})
-      scope: storage.type.receiver.go
+      scope: support.type.receiver.go
 
   func-generic-and-signature:
     - match: \[
@@ -387,7 +377,6 @@ contexts:
         - match: ,
           scope: punctuation.separator.parameter.go
         - include: types
-    # Function body start or end of signature
     - match: (?=\{)
       pop: true
     - match: (?=[;\n,\)\}])
@@ -400,7 +389,7 @@ contexts:
   var-const-declaration:
     - match: \b(const|var)\b
       captures:
-        1: storage.modifier.declaration.go
+        1: keyword.declaration.variable.go
       push:
         - match: \(
           captures:
@@ -419,10 +408,8 @@ contexts:
   var-const-inner:
     - match: \b(_)\b
       scope: variable.language.blank.go
-    # ALL_CAPS constants
     - match: \b([[:upper:]_][[:upper:]0-9_]{2,})\b(?=\s*(?:,|=|;|//|\n|$))
       scope: constant.other.declaration.go
-    # Standard variable/const name before = or type
     - match: ({{ident}})(?=\s*(?:,|=))
       scope: variable.other.declaration.go
     - match: ({{ident}})(?=\s+(?:\*|\b|\[|<-))
@@ -446,7 +433,7 @@ contexts:
   types:
     - match: \b(map)\s*(\[)
       captures:
-        1: storage.type.map.go
+        1: keyword.declaration.map.go
         2: punctuation.section.brackets.begin.go
       push:
         - match: \]
@@ -457,31 +444,29 @@ contexts:
     - match: (<-)?\b(chan)\b(\s*<-)?
       captures:
         1: keyword.operator.channel.receive.go
-        2: storage.type.channel.go
+        2: keyword.declaration.channel.go
         3: keyword.operator.channel.send.go
     - match: \b(struct)\b\s*(\{)
       captures:
-        1: storage.type.struct.go
+        1: keyword.declaration.struct.go
         2: punctuation.section.braces.begin.go
       push: struct-body
     - match: \b(interface)\b\s*(\{)
       captures:
-        1: storage.type.interface.go
+        1: keyword.declaration.interface.go
         2: punctuation.section.braces.begin.go
       push: interface-body
     - match: \b(func)\b(?=\s*\()
       captures:
-        1: storage.type.function.go
+        1: keyword.declaration.function.go
       push: func-parameters-and-returns
     - match: '{{predeclared_types}}'
       scope: storage.type.builtin.go
-    # Package-qualified type: pkg.Type
     - match: \b({{pkg_ident}})(\.)({{exported_ident}})\b
       captures:
         1: support.module.go
         2: punctuation.accessor.dot.go
         3: support.type.qualified.go
-    # Generic type instantiation: Type[T, K]
     - match: ({{ident}})(\[)
       captures:
         1: support.type.go
@@ -506,7 +491,6 @@ contexts:
   # Statements & Expressions
   # ============================================================================
   statements:
-    # Labels (goto / break / continue targets)
     - match: ^\s*({{ident}})\s*(:)(?!=)
       captures:
         1: entity.name.label.go
@@ -515,12 +499,10 @@ contexts:
       captures:
         1: keyword.control.flow.go
         2: entity.name.label.go
-    # Control Flow Keywords
     - match: \b(if|else|switch|case|default|for|range|select|return|break|continue|goto|fallthrough)\b
       scope: keyword.control.flow.go
     - match: \b(go|defer)\b
       scope: keyword.control.coroutine.go
-    # Short variable declaration: a, b := ...
     - match: \b({{ident}})(?=\s*(?:,\s*{{ident}})*\s*:=)
       captures:
         1: variable.other.declaration.short.go
@@ -546,7 +528,6 @@ contexts:
           captures:
             0: punctuation.section.braces.end.go
           pop: true
-        # Struct field key inside braces: FieldName: value
         - match: \b({{ident}})\s*(:)(?!=)
           captures:
             1: variable.other.member.key.go
@@ -557,18 +538,14 @@ contexts:
   # Calls, Accessors, & Disambiguation
   # ============================================================================
   function-and-method-calls:
-    # Built-in type conversion: int64(x), string(b), []byte(s)
     - match: '{{predeclared_types}}(?=\s*\()'
       scope: support.type.builtin.conversion.go
-    # Built-in functions: make(...), append(...), len(...), min(...), clear(...)
     - match: '{{predeclared_funcs}}(?=\s*\()'
       scope: support.function.builtin.go
-    # Package function call or method call: pkg.Func(...) or obj.Method(...)
     - match: (\.)({{ident}})(?=\s*\()
       captures:
         1: punctuation.accessor.dot.go
         2: variable.function.method.go
-    # Generic function/method call: Func[int](...)
     - match: (\.)?({{ident}})(\[)
       captures:
         1: punctuation.accessor.dot.go
@@ -581,16 +558,13 @@ contexts:
           pop: true
         - include: types
         - include: expressions
-    # Standalone function call: myFunc(...)
     - match: \b({{ident}})(?=\s*\()
       captures:
         1: variable.function.go
 
   identifiers-and-accessors:
-    # Blank identifier _
     - match: \b(_)\b
       scope: variable.language.blank.go
-    # Type assertion: x.(Type) or x.(type)
     - match: (\.)(\()
       captures:
         1: punctuation.accessor.dot.go
@@ -604,26 +578,20 @@ contexts:
         - match: \b(type)\b
           scope: keyword.control.switch.type.go
         - include: types
-    # Package qualifier before exported symbol: fmt.Println, http.StatusOK, io.EOF
     - match: \b({{pkg_ident}})(\.)(?={{exported_ident}})
       captures:
         1: support.module.go
         2: punctuation.accessor.dot.go
-    # Member/field access: user.Name, cfg.port
     - match: (\.)({{ident}})
       captures:
         1: punctuation.accessor.dot.go
         2: variable.other.member.go
-    # Predeclared types used in expressions (e.g. make([]int, 0))
     - match: '{{predeclared_types}}'
       scope: storage.type.builtin.go
-    # SCREAMING_SNAKE_CASE constants
     - match: \b([[:upper:]_][[:upper:]0-9_]{2,})\b
       scope: constant.other.caps.go
-    # Exported PascalCase identifier (Types / Exported symbols)
     - match: '{{exported_ident}}'
       scope: variable.other.exported.go
-    # Standard local identifier
     - match: '{{ident}}'
       scope: variable.other.readwrite.go
 
@@ -639,12 +607,10 @@ contexts:
     - include: strings
 
   numbers:
-    # Imaginary numbers
     - match: \b(?:0[xX]{{hex_digits}}(?:\.{{hex_digits}})?{{hex_exponent}}?|{{dec_digits}}(?:\.{{dec_digits}})?{{dec_exponent}}?|\.\d+(?:_\d+)*{{dec_exponent}}?)(i)\b
       scope: constant.numeric.imaginary.go
       captures:
         1: storage.type.numeric.imaginary.go
-    # Hexadecimal floats & ints
     - match: \b(0[xX]){{hex_digits}}(?:\.{{hex_digits}})?{{hex_exponent}}\b
       scope: constant.numeric.float.hexadecimal.go
       captures:
@@ -653,7 +619,6 @@ contexts:
       scope: constant.numeric.integer.hexadecimal.go
       captures:
         1: punctuation.definition.numeric.base.go
-    # Octal & Binary ints
     - match: \b(0[oO]?){{oct_digits}}\b
       scope: constant.numeric.integer.octal.go
       captures:
@@ -662,14 +627,12 @@ contexts:
       scope: constant.numeric.integer.binary.go
       captures:
         1: punctuation.definition.numeric.base.go
-    # Decimal floats & ints
     - match: (?:\b{{dec_digits}}\.{{dec_digits}}?{{dec_exponent}}?|\b{{dec_digits}}{{dec_exponent}}|\B\.{{dec_digits}}{{dec_exponent}}?)\b
       scope: constant.numeric.float.decimal.go
     - match: \b{{dec_digits}}\b
       scope: constant.numeric.integer.decimal.go
 
   strings:
-    # Interpreted string literals: "..."
     - match: '"'
       captures:
         0: punctuation.definition.string.begin.go
@@ -689,7 +652,6 @@ contexts:
           scope: invalid.illegal.unclosed-string.go
           pop: true
 
-    # Raw string literals: `...`
     - match: '`'
       captures:
         0: punctuation.definition.string.begin.go
@@ -702,7 +664,6 @@ contexts:
         - match: '{{fmt_verb}}'
           scope: constant.other.placeholder.go
 
-    # Rune literals: 'a', '\n', '\u1234'
     - match: (')(?:({{escape_char}})|([^'\\\n]))(')
       scope: string.quoted.single.rune.go
       captures:
